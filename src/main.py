@@ -118,6 +118,7 @@ class LabelGenerator:
 
             if brand['category'] == 'MED':
                 pdf.setFillColor(black)
+                pdf.setFont("Helvetica-Bold", 14)
                 pdf.drawString(x_p, y_p, f"{tier['name'].upper()} TIER")
                 pdf.line(x_p, y_p - 0.05 * inch, x_p + pricetag_width - 0.5 * inch, y_p - 0.05 * inch)
                 y_p -= 0.3 * inch
@@ -196,12 +197,14 @@ class JarLabelerApp:
         self.rec_list = tk.Listbox(self.rec_frame)
         self.rec_list.pack(fill='both', expand=True)
         self.rec_list.bind('<<ListboxSelect>>', lambda e: self.show_brand_details('REC'))
+        tk.Button(self.rec_frame, text="Delete Brand", command=self.delete_brand).pack()
 
         self.med_frame = ttk.LabelFrame(self.config_frame, text='MED Brands')
         self.med_frame.grid(row=0, column=1, padx=10, pady=10, sticky='ns')
         self.med_list = tk.Listbox(self.med_frame)
         self.med_list.pack(fill='both', expand=True)
         self.med_list.bind('<<ListboxSelect>>', lambda e: self.show_brand_details('MED'))
+        tk.Button(self.med_frame, text="Delete Brand", command=self.delete_brand).pack()
 
         # Tiers frame for selected brand
         self.tiers_frame = ttk.LabelFrame(self.config_frame, text='Brand Tiers')
@@ -212,6 +215,7 @@ class JarLabelerApp:
         self.tier_list.bind('<<ListboxSelect>>', self.show_tier_details)
         tk.Button(self.tiers_frame, text="Add Tier", command=self.open_add_tier_window).pack()
         tk.Button(self.tiers_frame, text="Edit Tier", command=self.open_edit_tier_window).pack()
+        tk.Button(self.tiers_frame, text="Delete Tier", command=self.delete_tier).pack()
 
         # Sub-frame for selected tier details (hidden initially)
         self.tier_details_frame = ttk.LabelFrame(self.tiers_frame, text='Tier Templates')
@@ -229,6 +233,7 @@ class JarLabelerApp:
 
         self.selected_brand_id = None
         self.selected_tier_id = None
+        self.selected_category = None  # To track for delete
         self.refresh_brand_lists()
         self.refresh_queue_list()  # Initial refresh
 
@@ -254,8 +259,9 @@ class JarLabelerApp:
             return
         brand_name = listbox.get(sel[0])
         c = self.db_conn.cursor()
-        c.execute("SELECT id FROM brands WHERE name=?", (brand_name,))
+        c.execute("SELECT id FROM brands WHERE name=? AND category=?", (brand_name, category))
         self.selected_brand_id = c.fetchone()[0]
+        self.selected_category = category  # Track for delete
         self.refresh_tier_list()
         self.tiers_frame.grid()  # Show the frame
         self.tier_details_frame.pack_forget()  # Reset tier details
@@ -436,12 +442,17 @@ class JarLabelerApp:
         brand_name = self.brand_combo.get()
         if brand_name:
             c = self.db_conn.cursor()
-            c.execute("SELECT id FROM brands WHERE name=?", (brand_name,))
-            brand_id = c.fetchone()[0]
-            c.execute("SELECT name FROM tiers WHERE brand_id=?", (brand_id,))
-            tiers = [row[0] for row in c.fetchall()]
-            self.tier_combo['values'] = tiers
-            self.tier_combo.set('')
+            c.execute("SELECT id FROM brands WHERE name=? AND category=?", (brand_name, self.category_combo.get()))
+            brand_id_row = c.fetchone()
+            if brand_id_row:
+                brand_id = brand_id_row[0]
+                c.execute("SELECT name FROM tiers WHERE brand_id=?", (brand_id,))
+                tiers = [row[0] for row in c.fetchall()]
+                self.tier_combo['values'] = tiers
+                self.tier_combo.set('')
+            else:
+                self.tier_combo['values'] = []
+                self.tier_combo.set('')
 
     def add_to_queue(self):
         try:
@@ -454,13 +465,19 @@ class JarLabelerApp:
             strain = Strain(self.name_entry.get(), self.class_combo.get(), thc, self.lineage_entry.get())
 
             c = self.db_conn.cursor()
-            c.execute("SELECT * FROM brands WHERE name=?", (brand_name,))
+            c.execute("SELECT * FROM brands WHERE name=? AND category=?", (brand_name, category))
             brand_data = c.fetchone()
-            brand = {'id': brand_data[0], 'name': brand_data[1], 'category': brand_data[2], 'logo_path': brand_data[3]}
+            if brand_data:
+                brand = {'id': brand_data[0], 'name': brand_data[1], 'category': brand_data[2], 'logo_path': brand_data[3]}
+            else:
+                raise ValueError("Brand not found for selected category.")
 
             c.execute("SELECT * FROM tiers WHERE brand_id=? AND name=?", (brand['id'], tier_name))
             tier_data = c.fetchone()
-            tier = {'id': tier_data[0], 'name': tier_data[2], 'nametag_bg_path': tier_data[3], 'pricetag_bg_path': tier_data[4]}
+            if tier_data:
+                tier = {'id': tier_data[0], 'name': tier_data[2], 'nametag_bg_path': tier_data[3], 'pricetag_bg_path': tier_data[4]}
+            else:
+                raise ValueError("Tier not found for selected brand.")
 
             self.gen.add_to_queue(strain, brand, tier)
             self.refresh_queue_list()
@@ -495,6 +512,43 @@ class JarLabelerApp:
             messagebox.showinfo("Success", f"PDF generated at {pdf_path}")
         except ValueError as e:
             messagebox.showerror("Error", str(e))
+
+    def delete_brand(self):
+        category = 'REC' if self.rec_list.curselection() else 'MED' if self.med_list.curselection() else None
+        if not category:
+            messagebox.showerror("Error", "Select a brand to delete.")
+            return
+        listbox = self.rec_list if category == 'REC' else self.med_list
+        sel = listbox.curselection()
+        if not sel:
+            return
+        brand_name = listbox.get(sel[0])
+        if messagebox.askyesno("Confirm", f"Delete brand {brand_name} and all its tiers?"):
+            c = self.db_conn.cursor()
+            c.execute("SELECT id FROM brands WHERE name=? AND category=?", (brand_name, category))
+            brand_id = c.fetchone()[0]
+            c.execute("DELETE FROM tiers WHERE brand_id=?", (brand_id,))
+            c.execute("DELETE FROM brands WHERE id=?", (brand_id,))
+            self.db_conn.commit()
+            self.refresh_brand_lists()
+            self.update_brands()
+            self.tiers_frame.grid_remove()
+            messagebox.showinfo("Deleted", f"Brand {brand_name} deleted.")
+
+    def delete_tier(self):
+        sel = self.tier_list.curselection()
+        if not sel or not self.selected_brand_id:
+            messagebox.showerror("Error", "Select a tier to delete.")
+            return
+        tier_name = self.tier_list.get(sel[0])
+        if messagebox.askyesno("Confirm", f"Delete tier {tier_name}?"):
+            c = self.db_conn.cursor()
+            c.execute("DELETE FROM tiers WHERE brand_id=? AND name=?", (self.selected_brand_id, tier_name))
+            self.db_conn.commit()
+            self.refresh_tier_list()
+            self.update_tiers()
+            self.tier_details_frame.pack_forget()
+            messagebox.showinfo("Deleted", f"Tier {tier_name} deleted.")
 
 if __name__ == "__main__":
     root = tk.Tk()
