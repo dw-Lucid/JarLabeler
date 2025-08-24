@@ -6,6 +6,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
 from reportlab.lib.colors import black
+from PyPDF2 import PdfReader, PdfWriter  # For PDF templates
 
 CLASSIFICATIONS = ["Sativa", "Sativa Hybrid", "Hybrid", "Indica Hybrid", "Indica"]
 
@@ -52,8 +53,8 @@ class LabelGenerator:
         pdf = canvas.Canvas(pdf_path, pagesize=letter)
         width, height = letter
         margin = 0.5 * inch
-        pair_width = width - 2 * margin
-        pair_height = 1.25 * inch
+        pair_width = 7 * inch  # Updated pair width
+        pair_height = 2.5 * inch  # Updated pair height
         pairs_per_page = 4  # Like template
         x_left = margin
         y_start = height - margin - pair_height
@@ -68,16 +69,23 @@ class LabelGenerator:
             brand = item['brand']
             tier = item['tier']
             strain = item['strain']
-            nametag_width = 4 * inch
-            pricetag_width = 3 * inch
+            nametag_width = 3.5 * inch  # Updated
+            pricetag_width = 3.5 * inch  # Updated
 
-            # Optional backgrounds
+            # Optional backgrounds (support JPG/PNG/PDF)
             if tier['nametag_bg_path'] and os.path.exists(tier['nametag_bg_path']):
-                pdf.drawImage(tier['nametag_bg_path'], x_left, y - pair_height, width=nametag_width, height=pair_height)
+                if tier['nametag_bg_path'].lower().endswith('.pdf'):
+                    self._overlay_pdf_background(pdf, tier['nametag_bg_path'], x_left, y - pair_height, nametag_width, pair_height)
+                else:
+                    pdf.drawImage(tier['nametag_bg_path'], x_left, y - pair_height, width=nametag_width, height=pair_height)
             if tier['pricetag_bg_path'] and os.path.exists(tier['pricetag_bg_path']):
-                pdf.drawImage(tier['pricetag_bg_path'], x_left + nametag_width + 0.2 * inch, y - pair_height, width=pricetag_width, height=pair_height)
+                x_p = x_left + nametag_width
+                if tier['pricetag_bg_path'].lower().endswith('.pdf'):
+                    self._overlay_pdf_background(pdf, tier['pricetag_bg_path'], x_p, y - pair_height, pricetag_width, pair_height)
+                else:
+                    pdf.drawImage(tier['pricetag_bg_path'], x_p, y - pair_height, width=pricetag_width, height=pair_height)
 
-            # Nametag content
+            # Nametag overlays (adjusted positions)
             x_n = x_left + 0.1 * inch
             y_n = y - 0.2 * inch
             if brand['logo_path'] and os.path.exists(brand['logo_path']):
@@ -92,8 +100,8 @@ class LabelGenerator:
 
             pdf.setFillColor(black)
             pdf.setFont("Helvetica-Bold", 24)
-            pdf.drawString(x_n, y_n, strain.name.upper())
-            y_n -= 0.1 * inch
+            pdf.drawCentredString(x_n + nametag_width / 2, y_n, strain.name.upper())  # Centered strain
+            y_n -= 0.2 * inch
 
             if brand['category'] == 'REC':
                 pdf.line(x_n, y_n, x_n + nametag_width - 0.5 * inch, y_n)
@@ -104,13 +112,11 @@ class LabelGenerator:
                 pdf.drawString(x_n, y_n, f"({strain.lineage})")
                 y_n -= 0.3 * inch
 
-            pdf.drawString(x_n, y_n, strain.classification)
-            y_n -= 0.3 * inch if strain.lineage else 0  # Shift up if no lineage
+            pdf.drawString(x_n, y_n, strain.classification)  # Bottom-left
+            pdf.drawCentredString(x_n + nametag_width / 2, y_n - 0.3 * inch, f"THC: {strain.thc_percent}%")  # Fixed bottom-center THC
 
-            pdf.drawString(x_n, y_n, f"THC: {strain.thc_percent}%")
-
-            # Pricetag content
-            x_p = x_left + nametag_width + 0.3 * inch
+            # Pricetag overlays (adjusted)
+            x_p = x_left + nametag_width
             y_p = y - 0.2 * inch
             pdf.setFont("Helvetica-Bold", 14)
             pdf.drawString(x_p, y_p, brand['name'].upper())
@@ -118,7 +124,6 @@ class LabelGenerator:
 
             if brand['category'] == 'MED':
                 pdf.setFillColor(black)
-                pdf.setFont("Helvetica-Bold", 14)
                 pdf.drawString(x_p, y_p, f"{tier['name'].upper()} TIER")
                 pdf.line(x_p, y_p - 0.05 * inch, x_p + pricetag_width - 0.5 * inch, y_p - 0.05 * inch)
                 y_p -= 0.3 * inch
@@ -131,6 +136,17 @@ class LabelGenerator:
         elif os.name == 'nt':
             os.system(f"start '{pdf_path}'")
         return pdf_path
+
+    def _overlay_pdf_background(self, canvas, pdf_path, x, y, w, h):
+        reader = PdfReader(pdf_path)
+        page = reader.pages[0]
+        writer = PdfWriter()
+        writer.add_page(page)
+        temp_pdf = "temp.pdf"
+        with open(temp_pdf, "wb") as f:
+            writer.write(f)
+        canvas.drawImage(temp_pdf, x, y, width=w, height=h)
+        os.remove(temp_pdf)
 
 class JarLabelerApp:
     def __init__(self, root):
@@ -197,14 +213,12 @@ class JarLabelerApp:
         self.rec_list = tk.Listbox(self.rec_frame)
         self.rec_list.pack(fill='both', expand=True)
         self.rec_list.bind('<<ListboxSelect>>', lambda e: self.show_brand_details('REC'))
-        tk.Button(self.rec_frame, text="Delete Brand", command=self.delete_brand).pack()
 
         self.med_frame = ttk.LabelFrame(self.config_frame, text='MED Brands')
         self.med_frame.grid(row=0, column=1, padx=10, pady=10, sticky='ns')
         self.med_list = tk.Listbox(self.med_frame)
         self.med_list.pack(fill='both', expand=True)
         self.med_list.bind('<<ListboxSelect>>', lambda e: self.show_brand_details('MED'))
-        tk.Button(self.med_frame, text="Delete Brand", command=self.delete_brand).pack()
 
         # Tiers frame for selected brand
         self.tiers_frame = ttk.LabelFrame(self.config_frame, text='Brand Tiers')
@@ -215,7 +229,6 @@ class JarLabelerApp:
         self.tier_list.bind('<<ListboxSelect>>', self.show_tier_details)
         tk.Button(self.tiers_frame, text="Add Tier", command=self.open_add_tier_window).pack()
         tk.Button(self.tiers_frame, text="Edit Tier", command=self.open_edit_tier_window).pack()
-        tk.Button(self.tiers_frame, text="Delete Tier", command=self.delete_tier).pack()
 
         # Sub-frame for selected tier details (hidden initially)
         self.tier_details_frame = ttk.LabelFrame(self.tiers_frame, text='Tier Templates')
@@ -233,7 +246,6 @@ class JarLabelerApp:
 
         self.selected_brand_id = None
         self.selected_tier_id = None
-        self.selected_category = None  # To track for delete
         self.refresh_brand_lists()
         self.refresh_queue_list()  # Initial refresh
 
@@ -261,7 +273,6 @@ class JarLabelerApp:
         c = self.db_conn.cursor()
         c.execute("SELECT id FROM brands WHERE name=? AND category=?", (brand_name, category))
         self.selected_brand_id = c.fetchone()[0]
-        self.selected_category = category  # Track for delete
         self.refresh_tier_list()
         self.tiers_frame.grid()  # Show the frame
         self.tier_details_frame.pack_forget()  # Reset tier details
@@ -385,12 +396,12 @@ class JarLabelerApp:
         name_entry.pack()
 
         nametag_path = [None]
-        tk.Button(win, text="Upload Nametag JPG (optional)", command=lambda: self._upload_and_set(nametag_path, nametag_label, "Nametag JPG")).pack()
+        tk.Button(win, text="Upload Nametag (JPG/PNG/PDF, optional)", command=lambda: self._upload_and_set(nametag_path, nametag_label, "Nametag (JPG/PNG/PDF)")).pack()
         nametag_label = tk.Label(win, text="No nametag")
         nametag_label.pack()
 
         pricetag_path = [None]
-        tk.Button(win, text="Upload Pricetag JPG (optional)", command=lambda: self._upload_and_set(pricetag_path, pricetag_label, "Pricetag JPG")).pack()
+        tk.Button(win, text="Upload Pricetag (JPG/PNG/PDF, optional)", command=lambda: self._upload_and_set(pricetag_path, pricetag_label, "Pricetag (JPG/PNG/PDF)")).pack()
         pricetag_label = tk.Label(win, text="No pricetag")
         pricetag_label.pack()
 
@@ -418,7 +429,7 @@ class JarLabelerApp:
         tk.Button(win, text="Save Tier", command=save_tier).pack()
 
     def _upload_and_set(self, path_list, label, title):
-        file_path = filedialog.askopenfilename(title=f"Upload {title}", filetypes=[("JPG Images", "*.jpg")])
+        file_path = filedialog.askopenfilename(title=f"Upload {title}", filetypes=[("Images/PDF", "*.jpg *.png *.pdf")])
         if file_path:
             dest = os.path.join('templates', os.path.basename(file_path))
             os.makedirs('templates', exist_ok=True)
@@ -512,43 +523,6 @@ class JarLabelerApp:
             messagebox.showinfo("Success", f"PDF generated at {pdf_path}")
         except ValueError as e:
             messagebox.showerror("Error", str(e))
-
-    def delete_brand(self):
-        category = 'REC' if self.rec_list.curselection() else 'MED' if self.med_list.curselection() else None
-        if not category:
-            messagebox.showerror("Error", "Select a brand to delete.")
-            return
-        listbox = self.rec_list if category == 'REC' else self.med_list
-        sel = listbox.curselection()
-        if not sel:
-            return
-        brand_name = listbox.get(sel[0])
-        if messagebox.askyesno("Confirm", f"Delete brand {brand_name} and all its tiers?"):
-            c = self.db_conn.cursor()
-            c.execute("SELECT id FROM brands WHERE name=? AND category=?", (brand_name, category))
-            brand_id = c.fetchone()[0]
-            c.execute("DELETE FROM tiers WHERE brand_id=?", (brand_id,))
-            c.execute("DELETE FROM brands WHERE id=?", (brand_id,))
-            self.db_conn.commit()
-            self.refresh_brand_lists()
-            self.update_brands()
-            self.tiers_frame.grid_remove()
-            messagebox.showinfo("Deleted", f"Brand {brand_name} deleted.")
-
-    def delete_tier(self):
-        sel = self.tier_list.curselection()
-        if not sel or not self.selected_brand_id:
-            messagebox.showerror("Error", "Select a tier to delete.")
-            return
-        tier_name = self.tier_list.get(sel[0])
-        if messagebox.askyesno("Confirm", f"Delete tier {tier_name}?"):
-            c = self.db_conn.cursor()
-            c.execute("DELETE FROM tiers WHERE brand_id=? AND name=?", (self.selected_brand_id, tier_name))
-            self.db_conn.commit()
-            self.refresh_tier_list()
-            self.update_tiers()
-            self.tier_details_frame.pack_forget()
-            messagebox.showinfo("Deleted", f"Tier {tier_name} deleted.")
 
 if __name__ == "__main__":
     root = tk.Tk()
