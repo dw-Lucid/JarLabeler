@@ -1,3 +1,5 @@
+CLASSIFICATIONS = ["Sativa", "Sativa Hybrid", "Hybrid", "Indica Hybrid", "Indica"]
+
 class Strain:
     def __init__(self, name, classification, thc_percent, lineage=''):
         self.name = name
