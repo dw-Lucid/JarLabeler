@@ -1,3 +1,4 @@
+import sqlite3
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
 from database import init_db
@@ -198,11 +199,14 @@ class JarLabelerApp:
                 return
             price_dict = {label: entry.get() or '' for label, entry in prices.items()}
             price_json = json.dumps(price_dict)
+            print(f"DEBUG: Saving tier with name={name}, prices={price_json}, nametag_logo_path={logo_path[0]}")
             c = self.db_conn.cursor()
             if data:  # Update existing for edit
+                print(f"DEBUG: UPDATE SQL with name={name}, prices={price_json}, nametag_logo_path={logo_path[0]}, old_name={data[0]}, brand_id={self.selected_brand_id}")
                 c.execute("UPDATE tiers SET name=?, prices=?, nametag_logo_path=? WHERE name=? AND brand_id=?", 
                           (name, price_json, logo_path[0], data[0], self.selected_brand_id))
             else:  # Insert new for add
+                print(f"DEBUG: INSERT SQL with brand_id={self.selected_brand_id}, name={name}, prices={price_json}, nametag_logo_path={logo_path[0]}")
                 c.execute("INSERT INTO tiers (brand_id, name, prices, nametag_logo_path) VALUES (?, ?, ?, ?)",
                           (self.selected_brand_id, name, price_json, logo_path[0]))
             self.db_conn.commit()
@@ -268,7 +272,14 @@ class JarLabelerApp:
             c.execute("SELECT * FROM tiers WHERE brand_id=? AND name=?", (brand['id'], tier_name))
             tier_data = c.fetchone()
             if tier_data:
-                tier = {'id': tier_data[0], 'name': tier_data[2], 'prices': tier_data[3] or '{}', 'nametag_logo_path': tier_data[4]}
+                # Indices: 0=id, 1=brand_id, 2=name, 3=nametag_bg_path, 4=pricetag_bg_path, 5=prices, 6=nametag_logo_path
+                import json
+                tier = {
+                    'id': tier_data[0],
+                    'name': tier_data[2],
+                    'prices': json.loads(tier_data[5] or '{}'),
+                    'nametag_logo_path': tier_data[6]
+                }
             else:
                 raise ValueError("Tier not found for selected brand.")
             self.gen.add_to_queue(strain, brand, tier)
