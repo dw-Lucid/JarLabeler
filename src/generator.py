@@ -49,55 +49,56 @@ class LabelGenerator:
             # Nametag
             center_x = x_left + label_width / 2
             y_top = y - 0.1 * inch
-            brand = item['brand']
-            tier = item['tier']
-            strain = item['strain']
-            # Nametag
-            center_x = x_left + label_width / 2
-            # Dynamically size logo to fit label and leave space for text
-            max_logo_width = label_width * 0.7
-            max_logo_height = label_height * 0.35
+            # Prepare text elements
+            text_elements = [
+                ("Helvetica-Bold", 12, tier['name'].upper()),
+                ("Helvetica-Bold", 18, strain.name.upper(), True), # underline
+            ]
+            if strain.lineage:
+                text_elements.append(("Helvetica", 10, f"({strain.lineage})"))
+            text_elements.append(("Helvetica-Bold", 14, strain.classification))
+            text_elements.append(("Helvetica-Bold", 14, f"THC: {strain.thc_percent:.2f}%"))
+            # Estimate total text height
+            total_text_height = 0
+            for font, size, *_ in text_elements:
+                pdf.setFont(font, size)
+                total_text_height += pdf._leading + 0.08 * inch
+            # Set max logo height so logo + text fits label
+            available_height = label_height - 0.2 * inch
+            max_logo_height = available_height * 0.35
+            max_logo_width = label_width * 0.6
             logo_height_used = 0
-            y_top = y - 0.1 * inch
             logo_path = tier.get('nametag_logo_path')
             if logo_path:
                 abs_logo_path = os.path.abspath(logo_path)
                 if os.path.exists(abs_logo_path):
                     try:
                         logo_img = ImageReader(abs_logo_path)
-                        # Get actual image size
                         img_w, img_h = logo_img.getSize()
                         aspect = img_w / img_h
-                        if img_w > img_h:
-                            logo_width = min(max_logo_width, img_w * (max_logo_height / img_h))
+                        if aspect > 1:
+                            logo_width = max_logo_width
                             logo_height = logo_width / aspect
                         else:
-                            logo_height = min(max_logo_height, img_h * (max_logo_width / img_w))
+                            logo_height = max_logo_height
                             logo_width = logo_height * aspect
-                        # Center logo at top
-                        pdf.drawImage(logo_img, center_x - logo_width/2, y_top - logo_height, logo_width, logo_height, mask='auto')
+                        # If logo + text exceeds available height, shrink logo
+                        if logo_height + total_text_height > available_height:
+                            logo_height = available_height - total_text_height
+                            logo_width = logo_height * aspect
+                        logo_x = center_x - logo_width / 2
+                        logo_y = y_top - logo_height
+                        pdf.drawImage(logo_img, logo_x, logo_y, logo_width, logo_height, mask='auto')
                         logo_height_used = logo_height + 0.12 * inch
                     except Exception as e:
                         print(f"Tier logo error: {e}")
                 else:
                     print(f"Tier logo file not found: {abs_logo_path}")
-            # Calculate available space for text
-            y_current = y_top - logo_height_used
-            text_elements = []
-            text_elements.append(("Helvetica-Bold", 13, tier['name']))
-            text_elements.append(("Helvetica-BoldOblique", 18, strain.name, True))  # underline
-            if strain.lineage:
-                text_elements.append(("Helvetica", 10, f"({strain.lineage})"))
-            text_elements.append(("Helvetica-Bold", 14, strain.classification))
-            text_elements.append(("Helvetica-Bold", 14, f"THC: {strain.thc_percent:.2f}%"))
-            # Calculate total text height
-            total_text_height = 0
-            for font, size, *_ in text_elements:
-                pdf.setFont(font, size)
-                total_text_height += pdf._leading + 0.08 * inch
-            # Center text block vertically in remaining space
-            y_text_start = y_current - total_text_height / 2 + 0.2 * inch
-            y_current = y_text_start
+            else:
+                logo_height_used = 0.3 * inch
+            # Add extra space between logo and first text line
+            gap_after_logo = 0.18 * inch
+            y_current = y_top - logo_height_used - gap_after_logo
             for elem in text_elements:
                 font, size, text = elem[:3]
                 underline = elem[3] if len(elem) > 3 else False
@@ -106,55 +107,62 @@ class LabelGenerator:
                 if underline:
                     text_width = pdf.stringWidth(text)
                     underline_y = y_current - 0.05 * inch
-                    pdf.setLineWidth(2)
                     pdf.line(center_x - text_width / 2, underline_y, center_x + text_width / 2, underline_y)
-                    pdf.setLineWidth(1)
                 y_current -= pdf._leading + 0.08 * inch
             # Pricetag
             p_center_x = x_left + label_width + label_width / 2
             p_y_current = y - 0.1 * inch
-            # Brand name: bold, underline
-            pdf.setFont("Helvetica-Bold", 20)
-            brand_text = brand['name']
+            pdf.setFont("Helvetica-Bold", 18)
+            brand_text = brand['name'].upper()
+            brand_width = pdf.stringWidth(brand_text)
             pdf.drawCentredString(p_center_x, p_y_current, brand_text)
             underline_y = p_y_current - 0.05 * inch
-            brand_width = pdf.stringWidth(brand_text)
-            pdf.setLineWidth(2)
             pdf.line(p_center_x - brand_width / 2, underline_y, p_center_x + brand_width / 2, underline_y)
-            pdf.setLineWidth(1)
-            p_y_current -= 0.28 * inch
-            # Tier name: bold, underline
-            pdf.setFont("Helvetica-Bold", 16)
-            tier_text = tier['name']
+            p_y_current -= 0.3 * inch
+            pdf.setFont("Helvetica-Bold", 14)
+            tier_text = tier['name'].upper()
+            tier_width = pdf.stringWidth(tier_text)
             pdf.drawCentredString(p_center_x, p_y_current, tier_text)
             underline_y = p_y_current - 0.05 * inch
-            tier_width = pdf.stringWidth(tier_text)
-            pdf.setLineWidth(1.5)
             pdf.line(p_center_x - tier_width / 2, underline_y, p_center_x + tier_width / 2, underline_y)
-            pdf.setLineWidth(1)
-            p_y_current -= 0.22 * inch
-            # Prices: bold, arranged in two rows
-            pdf.setFont("Helvetica-Bold", 16)
+            p_y_current -= 0.3 * inch
+            pdf.setFont("Helvetica-Bold", 14)
             prices = tier.get('prices', {})
             def format_price(weight, price):
                 if price:
                     return f"{weight}-${price}"
-                return ''
-            line1 = '   '.join(filter(None, [format_price('1g', prices.get('1g', '')), format_price('3.5g', prices.get('3.5g', ''))]))
-            pdf.drawCentredString(p_center_x, p_y_current, line1)
-            p_y_current -= 0.25 * inch
-            line2 = '   '.join(filter(None, [format_price('7g', prices.get('7g', '')), format_price('14g', prices.get('14g', ''))]))
-            pdf.drawCentredString(p_center_x, p_y_current, line2)
-            p_y_current -= 0.25 * inch
-            line3 = format_price('28g', prices.get('28g', ''))
-            pdf.drawCentredString(p_center_x, p_y_current, line3)
+                # Pricetag: evenly distribute elements to fill right half
+                p_center_x = x_left + label_width + label_width / 2
+                p_top = y - 0.1 * inch
+                p_bottom = y - label_height + 0.1 * inch
+                # Prepare pricetag elements
+                prices = tier.get('prices', {})
+                price_lines = [
+                    ("Helvetica-Bold", 18, brand['name'].upper(), True), # underline
+                    ("Helvetica-Bold", 14, tier['name'].upper(), True), # underline
+                    ("Helvetica-Bold", 16, '   '.join(filter(None, [f"1g-${prices.get('1g','')}" if prices.get('1g') else '', f"3.5g-${prices.get('3.5g','')}" if prices.get('3.5g') else '']))),
+                    ("Helvetica-Bold", 16, '   '.join(filter(None, [f"7g-${prices.get('7g','')}" if prices.get('7g') else '', f"14g-${prices.get('14g','')}" if prices.get('14g') else '']))),
+                    ("Helvetica-Bold", 16, f"28g-${prices.get('28g','')}" if prices.get('28g') else ''),
+                ]
+                # Calculate total height for pricetag
+                total_price_height = 0
+                for font, size, *_ in price_lines:
+                    pdf.setFont(font, size)
+                    total_price_height += pdf._leading + 0.08 * inch
+                # Evenly space pricetag elements
+                price_gap = (p_top - p_bottom - total_price_height) / (len(price_lines) + 1)
+                p_y_current = p_top - price_gap
+                for elem in price_lines:
+                    font, size, text = elem[:3]
+                    underline = elem[3] if len(elem) > 3 else False
+                    pdf.setFont(font, size)
+                    pdf.drawCentredString(p_center_x, p_y_current, text)
+                    if underline and text:
+                        text_width = pdf.stringWidth(text)
+                        underline_y = p_y_current - 0.05 * inch
+                        pdf.line(p_center_x - text_width / 2, underline_y, p_center_x + text_width / 2, underline_y)
+                    p_y_current -= pdf._leading + 0.08 * inch + price_gap
         pdf.save()
-        print(f"PDF saved at: {os.path.abspath(pdf_path)}")
-        if os.path.exists(pdf_path):
-            print("File exists and size:", os.path.getsize(pdf_path))
-        else:
-            print("File not created!")
-        self.queue.clear()
         abs_path = os.path.abspath(pdf_path)
         try:
             if os.name == 'posix':
@@ -162,32 +170,6 @@ class LabelGenerator:
             elif os.name == 'nt':
                 subprocess.call(['start', abs_path], shell=True)
         except Exception as e:
-            print(f"Failed to open PDF: {e}")
             messagebox.showerror("Open Failed", f"PDF at {abs_path}; error: {e}. Open manually.")
         return pdf_path
-        try:
-            if os.name == 'posix':
-                subprocess.call(['open', abs_path])
-            elif os.name == 'nt':
-                subprocess.call(['start', abs_path], shell=True)
-        except Exception as e:
-            print(f"Failed to open PDF: {e}")
-            messagebox.showerror("Open Failed", f"PDF at {abs_path}; error: {e}. Open manually.")
-        return pdf_path
-        pdf.save()
-        print(f"PDF saved at: {os.path.abspath(pdf_path)}")
-        if os.path.exists(pdf_path):
-            print("File exists and size:", os.path.getsize(pdf_path))
-        else:
-            print("File not created!")
-        self.queue.clear()
-        abs_path = os.path.abspath(pdf_path)
-        try:
-            if os.name == 'posix':
-                subprocess.call(['open', abs_path])
-            elif os.name == 'nt':
-                subprocess.call(['start', abs_path], shell=True)
-        except Exception as e:
-            print(f"Failed to open PDF: {e}")
-            messagebox.showerror("Open Failed", f"PDF at {abs_path}; error: {e}. Open manually.")
         return pdf_path
