@@ -3,12 +3,15 @@ import subprocess  # For improved PDF opening
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch
-from reportlab.lib.colors import black
+from reportlab.lib.colors import black, red
 from PyPDF2 import PdfReader, PdfWriter
 from models import Strain
 from tkinter import messagebox
 import pytesseract
-from PIL import Image  # From Pillow
+from PIL import Image, ImageOps  # From Pillow
+from pdf2image import convert_from_path  # For PDF to image conversion
+
+pytesseract.pytesseract.tesseract_cmd = '/opt/local/bin/tesseract'  # MacPorts path
 
 class LabelGenerator:
     def __init__(self, db_conn):
@@ -71,8 +74,8 @@ class LabelGenerator:
             y_bottom = (y - pair_height) + inner_margin
             # Use OCR to get dynamic top skip based on template content
             template_bottom_y = self._get_template_bottom_y(nametag_bg_path, label_height) if nametag_bg_path else 0
-            y_top = y - inner_margin - max(tier.get('nametag_top_margin', 0.6) * inch, template_bottom_y + 0.3 * inch)  # Use OCR or manual max, with buffer
-            available_height = label_height - 2 * inner_margin - max(tier.get('nametag_top_margin', 0.6) * inch, template_bottom_y)
+            y_top = y - inner_margin - max(tier.get('nametag_top_margin', 0.6) * inch, template_bottom_y + 0.5 * inch)  # Increased buffer
+            available_height = label_height - 2 * inner_margin - max(tier.get('nametag_top_margin', 0.6) * inch, template_bottom_y) - 0.2 * inch  # Safety border padding
             elements = []
             logo_height = 0
             if brand['logo_path'] and os.path.exists(brand['logo_path']):
@@ -86,11 +89,10 @@ class LabelGenerator:
             strain_text = strain.name.upper()
             strain_width = pdf.stringWidth(strain_text)
             max_strain_width = label_width - 2 * inner_margin
-            if strain_width > max_strain_width:
-                while strain_width > max_strain_width and strain_font_size > 12:
-                    strain_font_size -= 1
-                    pdf.setFont("Helvetica-Bold", strain_font_size)
-                    strain_width = pdf.stringWidth(strain_text)
+            while strain_width > max_strain_width and strain_font_size > 10:  # Lower min font to fit border
+                strain_font_size -= 1
+                pdf.setFont("Helvetica-Bold", strain_font_size)
+                strain_width = pdf.stringWidth(strain_text)
             strain_height = pdf._leading
             elements.append(('strain', strain_height))
             lineage_height = 0
@@ -103,13 +105,13 @@ class LabelGenerator:
             class_text = strain.classification
             class_height = pdf._leading
             elements.append(('classification', class_height))
-            thc_text = f"THC: {strain.thc_percent:g}%"
+            thc_text = f"THC: {strain.thc_percent:.2f}%"  # Fixed to 2 decimals like desired
             thc_height = pdf._leading
             elements.append(('thc', thc_height))
             total_content_height = sum(h for _, h in elements) + (len(elements) - 1) * 0.1 * inch
             if logo_height > 0:
                 total_content_height += 0.2 * inch
-            spacing = 0.1 * inch if total_content_height < available_height * 0.8 else 0.05 * inch
+            spacing = 0.1 * inch if total_content_height < available_height * 0.8 else 0.03 * inch  # Aggressive compression to fit border
             y_current = y_top - logo_height - 0.3 * inch  # Extra skip
             if brand['logo_path'] and os.path.exists(brand['logo_path']):
                 logo_x = center_x - (logo_width / 2)
@@ -122,9 +124,30 @@ class LabelGenerator:
             if strain.lineage:
                 pdf.drawCentredString(center_x, y_current, lineage_text)
                 y_current -= lineage_height + spacing
+            pdf.setFont("Helvetica", 12)
             pdf.drawCentredString(center_x, y_current, class_text)
             y_current -= class_height + spacing
             pdf.drawCentredString(center_x, y_current, thc_text)
+            # Pricetag overlays (add pricing; assume tier has 'prices' dict from ui, e.g., {'1g': '$2', '3.5g': '$5', ...}
+            if pricetag_bg_path:
+                p_center_x = x_p + label_width / 2
+                p_y_current = y - inner_margin - 0.3 * inch  # Start below template header
+                pdf.setFont("Helvetica-Bold", 14)
+                pdf.setFillColor(red)
+                pdf.drawCentredString(p_center_x, p_y_current, "NuHi")
+                p_y_current -= 0.2 * inch
+                pdf.drawCentredString(p_center_x, p_y_current, "RED Tier:")
+                p_y_current -= 0.2 * inch
+                pdf.setFillColor(black)
+                pdf.setFont("Helvetica", 12)
+                prices_left = ["1g $2", "7g $10", "28g $40"]
+                prices_right = ["3.5g $5", "14g $20", "1LB - $600"]
+                p_left_x = x_p + label_width / 4
+                p_right_x = x_p + label_width * 3 / 4
+                for left, right in zip(prices_left, prices_right):
+                    pdf.drawCentredString(p_left_x, p_y_current, left)
+                    pdf.drawCentredString(p_right_x, p_y_current, right)
+                    p_y_current -= 0.15 * inch  # Tight spacing
         pdf.save()
         print(f"PDF saved at: {os.path.abspath(pdf_path)}")
         if os.path.exists(pdf_path):
@@ -148,15 +171,12 @@ class LabelGenerator:
         try:
             # Load image (PNG/JPG or convert PDF to image)
             if bg_path.lower().endswith('.pdf'):
-                reader = PdfReader(bg_path)
-                page = reader.pages[0]
-                # Convert PDF page to image using Pillow (simple method; assume first page)
-                from io import BytesIO
-                from reportlab.pdfbase.pdfdoc import PDFPage
-                # Alternative: Use pdf2john or external, but for simplicity, assume image templates or skip for PDF
-                return 0  # Fallback for PDF - improve if needed
+                img = convert_from_path(bg_path)[0]  # First page as image
             else:
                 img = Image.open(bg_path)
+            # Pre-process for better visual detection (grayscale, threshold to binary for edges)
+            img = ImageOps.grayscale(img)
+            img = img.point(lambda x: 0 if x < 128 else 255, '1')  # Binary threshold
             # Use pytesseract to get bounding boxes
             data = pytesseract.image_to_boxes(img, output_type=pytesseract.Output.DICT)
             if not data['bottom']:
@@ -165,6 +185,7 @@ class LabelGenerator:
             # Convert to inches (assume img height = label_height * 72 dpi for PDF scale)
             dpi = 72  # Standard PDF DPI
             max_bottom_inches = max_bottom / dpi
+            print(f"Detected template bottom y: {max_bottom_inches}")  # Debug to console for testing
             return max_bottom_inches
         except Exception as e:
             print(f"OCR failed for {bg_path}: {e}")
