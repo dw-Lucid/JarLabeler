@@ -48,42 +48,93 @@ class LabelGenerator:
             strain = item['strain']
             # Nametag
             center_x = x_left + label_width / 2
-            y_current = y - 0.1 * inch
-            pdf.setFont("Helvetica-Bold", 16)
-            pdf.drawCentredString(center_x, y_current, brand['name'])
-            y_current -= 0.22 * inch
-            pdf.setFont("Helvetica-Bold", 13)
-            pdf.drawCentredString(center_x, y_current, tier['name'])
-            y_current -= 0.22 * inch
-            pdf.setFont("Helvetica-Bold", 18)
-            strain_text = strain.name
-            strain_width = pdf.stringWidth(strain_text)
-            max_strain_width = label_width - 0.2 * inch
-            while strain_width > max_strain_width and pdf._fontsize > 10:
-                pdf.setFont("Helvetica-Bold", pdf._fontsize - 1)
-                strain_width = pdf.stringWidth(strain_text)
-            pdf.drawCentredString(center_x, y_current, strain_text)
-            underline_y = y_current - 0.05 * inch
-            pdf.line(center_x - strain_width / 2, underline_y, center_x + strain_width / 2, underline_y)
-            y_current -= pdf._leading + 0.18 * inch
-            pdf.setFont("Helvetica", 10)
+            y_top = y - 0.1 * inch
+            brand = item['brand']
+            tier = item['tier']
+            strain = item['strain']
+            # Nametag
+            center_x = x_left + label_width / 2
+            # Dynamically size logo to fit label and leave space for text
+            max_logo_width = label_width * 0.7
+            max_logo_height = label_height * 0.35
+            logo_height_used = 0
+            y_top = y - 0.1 * inch
+            logo_path = tier.get('nametag_logo_path')
+            if logo_path:
+                abs_logo_path = os.path.abspath(logo_path)
+                if os.path.exists(abs_logo_path):
+                    try:
+                        logo_img = ImageReader(abs_logo_path)
+                        # Get actual image size
+                        img_w, img_h = logo_img.getSize()
+                        aspect = img_w / img_h
+                        if img_w > img_h:
+                            logo_width = min(max_logo_width, img_w * (max_logo_height / img_h))
+                            logo_height = logo_width / aspect
+                        else:
+                            logo_height = min(max_logo_height, img_h * (max_logo_width / img_w))
+                            logo_width = logo_height * aspect
+                        # Center logo at top
+                        pdf.drawImage(logo_img, center_x - logo_width/2, y_top - logo_height, logo_width, logo_height, mask='auto')
+                        logo_height_used = logo_height + 0.12 * inch
+                    except Exception as e:
+                        print(f"Tier logo error: {e}")
+                else:
+                    print(f"Tier logo file not found: {abs_logo_path}")
+            # Calculate available space for text
+            y_current = y_top - logo_height_used
+            text_elements = []
+            text_elements.append(("Helvetica-Bold", 13, tier['name']))
+            text_elements.append(("Helvetica-BoldOblique", 18, strain.name, True))  # underline
             if strain.lineage:
-                pdf.drawCentredString(center_x, y_current, f"({strain.lineage})")
-                y_current -= 0.18 * inch
-            pdf.setFont("Helvetica", 12)
-            pdf.drawCentredString(center_x, y_current, strain.classification)
-            y_current -= 0.18 * inch
-            pdf.drawCentredString(center_x, y_current, f"THC: {strain.thc_percent:.2f}%")
+                text_elements.append(("Helvetica", 10, f"({strain.lineage})"))
+            text_elements.append(("Helvetica-Bold", 14, strain.classification))
+            text_elements.append(("Helvetica-Bold", 14, f"THC: {strain.thc_percent:.2f}%"))
+            # Calculate total text height
+            total_text_height = 0
+            for font, size, *_ in text_elements:
+                pdf.setFont(font, size)
+                total_text_height += pdf._leading + 0.08 * inch
+            # Center text block vertically in remaining space
+            y_text_start = y_current - total_text_height / 2 + 0.2 * inch
+            y_current = y_text_start
+            for elem in text_elements:
+                font, size, text = elem[:3]
+                underline = elem[3] if len(elem) > 3 else False
+                pdf.setFont(font, size)
+                pdf.drawCentredString(center_x, y_current, text)
+                if underline:
+                    text_width = pdf.stringWidth(text)
+                    underline_y = y_current - 0.05 * inch
+                    pdf.setLineWidth(2)
+                    pdf.line(center_x - text_width / 2, underline_y, center_x + text_width / 2, underline_y)
+                    pdf.setLineWidth(1)
+                y_current -= pdf._leading + 0.08 * inch
             # Pricetag
             p_center_x = x_left + label_width + label_width / 2
             p_y_current = y - 0.1 * inch
+            # Brand name: bold, underline
+            pdf.setFont("Helvetica-Bold", 20)
+            brand_text = brand['name']
+            pdf.drawCentredString(p_center_x, p_y_current, brand_text)
+            underline_y = p_y_current - 0.05 * inch
+            brand_width = pdf.stringWidth(brand_text)
+            pdf.setLineWidth(2)
+            pdf.line(p_center_x - brand_width / 2, underline_y, p_center_x + brand_width / 2, underline_y)
+            pdf.setLineWidth(1)
+            p_y_current -= 0.28 * inch
+            # Tier name: bold, underline
             pdf.setFont("Helvetica-Bold", 16)
-            pdf.drawCentredString(p_center_x, p_y_current, brand['name'])
+            tier_text = tier['name']
+            pdf.drawCentredString(p_center_x, p_y_current, tier_text)
+            underline_y = p_y_current - 0.05 * inch
+            tier_width = pdf.stringWidth(tier_text)
+            pdf.setLineWidth(1.5)
+            pdf.line(p_center_x - tier_width / 2, underline_y, p_center_x + tier_width / 2, underline_y)
+            pdf.setLineWidth(1)
             p_y_current -= 0.22 * inch
-            pdf.setFont("Helvetica-Bold", 13)
-            pdf.drawCentredString(p_center_x, p_y_current, tier['name'])
-            p_y_current -= 0.22 * inch
-            pdf.setFont("Helvetica-Bold", 14)
+            # Prices: bold, arranged in two rows
+            pdf.setFont("Helvetica-Bold", 16)
             prices = tier.get('prices', {})
             def format_price(weight, price):
                 if price:
