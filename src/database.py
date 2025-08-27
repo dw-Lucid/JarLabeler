@@ -9,7 +9,6 @@ def init_db():
                  (id INTEGER PRIMARY KEY, name TEXT, category TEXT, logo_path TEXT,
                   UNIQUE(name, category))''')
     c.execute('''CREATE TABLE IF NOT EXISTS tiers
-                 (id INTEGER PRIMARY KEY, brand_id INTEGER, name TEXT, nametag_bg_path TEXT, pricetag_bg_path TEXT,
-                  nametag_top_margin REAL DEFAULT 0.5)''')  # New column for dynamic margin (inches)
+                 (id INTEGER PRIMARY KEY, brand_id INTEGER, name TEXT, prices TEXT DEFAULT '{}', nametag_logo_path TEXT)''')
     conn.commit()
     return conn

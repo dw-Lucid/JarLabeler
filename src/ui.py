@@ -1,12 +1,10 @@
-
-import sqlite3
 import tkinter as tk
 from tkinter import messagebox, filedialog, ttk
-from models import Strain
-from generator import LabelGenerator
 from database import init_db
-
-CLASSIFICATIONS = ["Sativa", "Sativa Hybrid", "Hybrid", "Indica Hybrid", "Indica"]
+from generator import LabelGenerator
+from models import Strain, CLASSIFICATIONS
+import os
+import json  # For json.loads
 
 class JarLabelerApp:
     def __init__(self, root):
@@ -65,7 +63,7 @@ class JarLabelerApp:
         self.med_list.pack(fill='both', expand=True)
         self.med_list.bind('<<ListboxSelect>>', lambda e: self.show_brand_details('MED'))
         # Tiers frame for selected brand
-        self.tiers_frame = ttk.LabelFrame(self.config_frame, text='Pricing Tiers')
+        self.tiers_frame = ttk.LabelFrame(self.config_frame, text='Brand Tiers')
         self.tiers_frame.grid(row=0, column=2, rowspan=2, padx=10, pady=10, sticky='ns')
         self.tiers_frame.grid_remove()  # Hide until brand selected
         self.tier_list = tk.Listbox(self.tiers_frame)
@@ -81,7 +79,6 @@ class JarLabelerApp:
         self.refresh_brand_lists()
         self.refresh_queue_list()  # Initial refresh
 
-    # All methods from main.py related to UI, event handling, and Tkinter logic
     def refresh_brand_lists(self):
         self.rec_list.delete(0, tk.END)
         self.med_list.delete(0, tk.END)
@@ -93,6 +90,7 @@ class JarLabelerApp:
         for row in c.fetchall():
             self.med_list.insert(tk.END, row[1])
         self.tiers_frame.grid_remove()
+
     def show_brand_details(self, category):
         if category == 'REC':
             sel = self.rec_list.curselection()
@@ -109,6 +107,7 @@ class JarLabelerApp:
         self.refresh_tier_list()
         self.tiers_frame.grid()  # Show the frame
         self.selected_tier_id = None
+
     def refresh_tier_list(self):
         self.tier_list.delete(0, tk.END)
         if self.selected_brand_id:
@@ -116,6 +115,7 @@ class JarLabelerApp:
             c.execute("SELECT id, name FROM tiers WHERE brand_id=?", (self.selected_brand_id,))
             for row in c.fetchall():
                 self.tier_list.insert(tk.END, row[1])
+
     def open_new_brand_window(self):
         win = tk.Toplevel(self.root)
         win.title("Create New Brand")
@@ -147,11 +147,13 @@ class JarLabelerApp:
             except sqlite3.IntegrityError:
                 messagebox.showerror("Error", "Brand name must be unique within category.")
         tk.Button(win, text="Save Brand", command=save_brand).pack()
+
     def open_add_tier_window(self):
         if not self.selected_brand_id:
             messagebox.showerror("Error", "Select a brand first.")
             return
         self._open_tier_window("Add Tier")
+
     def open_edit_tier_window(self):
         sel = self.tier_list.curselection()
         if not sel or not self.selected_brand_id:
@@ -159,57 +161,67 @@ class JarLabelerApp:
             return
         tier_name = self.tier_list.get(sel[0])
         c = self.db_conn.cursor()
-        c.execute("SELECT name, nametag_bg_path, pricetag_bg_path FROM tiers WHERE brand_id=? AND name=?",
+        c.execute("SELECT name, prices, nametag_logo_path FROM tiers WHERE brand_id=? AND name=?", 
                   (self.selected_brand_id, tier_name))
         data = c.fetchone()
         self._open_tier_window("Edit Tier", data)
+
     def _open_tier_window(self, title, data=None):
         win = tk.Toplevel(self.root)
         win.title(title)
         tk.Label(win, text="Tier Name").pack()
         name_entry = tk.Entry(win)
         name_entry.pack()
-        nametag_path = [None]
-        tk.Button(win, text="Upload Nametag (JPG/PNG/PDF)", command=lambda: self._upload_and_set(nametag_path, nametag_label, "Nametag (JPG/PNG/PDF)")).pack()
-        nametag_label = tk.Label(win, text="No nametag")
-        nametag_label.pack()
-        pricetag_path = [None]
-        tk.Button(win, text="Upload Pricetag (JPG/PNG/PDF)", command=lambda: self._upload_and_set(pricetag_path, pricetag_label, "Pricetag (JPG/PNG/PDF)")).pack()
-        pricetag_label = tk.Label(win, text="No pricetag")
-        pricetag_label.pack()
+        logo_path = [None]
+        tk.Button(win, text="Upload Nametag Header Logo (optional)", command=lambda: self._upload_and_set(logo_path, logo_label, "Nametag Header Logo")).pack()
+        logo_label = tk.Label(win, text="No logo")
+        logo_label.pack()
+        # Pricing boxes (6 for REC/MED; 1g to 1lb)
+        price_labels = ["1g", "3.5g", "7g", "14g", "28g", "1lb"]
+        prices = {}
+        for label in price_labels:
+            tk.Label(win, text=f"{label} Price (optional)").pack()
+            entry = tk.Entry(win)
+            entry.pack()
+            prices[label] = entry
         if data:
             name_entry.insert(0, data[0])
-            nametag_path[0] = data[1]
-            pricetag_path[0] = data[2]
-            nametag_label['text'] = data[1] or "No nametag"
-            pricetag_label['text'] = data[2] or "No pricetag"
+            logo_path[0] = data[2]
+            logo_label['text'] = data[2] or "No logo"
+            saved_prices = json.loads(data[1] or "{}")
+            for label, entry in prices.items():
+                entry.insert(0, saved_prices.get(label, ''))
         def save_tier():
             name = name_entry.get()
             if not name:
                 messagebox.showerror("Error", "Tier name required.")
                 return
+            price_dict = {label: entry.get() or '' for label, entry in prices.items()}
+            price_json = json.dumps(price_dict)
             c = self.db_conn.cursor()
             if data:  # Update existing for edit
-                c.execute("UPDATE tiers SET name=?, nametag_bg_path=?, pricetag_bg_path=? WHERE name=? AND brand_id=?", (name, nametag_path[0], pricetag_path[0], data[0], self.selected_brand_id))
+                c.execute("UPDATE tiers SET name=?, prices=?, nametag_logo_path=? WHERE name=? AND brand_id=?", 
+                          (name, price_json, logo_path[0], data[0], self.selected_brand_id))
             else:  # Insert new for add
-                c.execute("INSERT INTO tiers (brand_id, name, nametag_bg_path, pricetag_bg_path) VALUES (?, ?, ?, ?)",
-                          (self.selected_brand_id, name, nametag_path[0], pricetag_path[0]))
+                c.execute("INSERT INTO tiers (brand_id, name, prices, nametag_logo_path) VALUES (?, ?, ?, ?)",
+                          (self.selected_brand_id, name, price_json, logo_path[0]))
             self.db_conn.commit()
             self.refresh_tier_list()
             self.update_tiers()  # Refresh main tab
             messagebox.showinfo("Success", f"Tier {name} {title.lower()}ed.")
             win.destroy()
         tk.Button(win, text="Save Tier", command=save_tier).pack()
+
     def _upload_and_set(self, path_list, label, title):
-        file_path = filedialog.askopenfilename(title=f"Upload {title}", filetypes=[("Images/PDF", "*.jpg *.png *.pdf")])
+        file_path = filedialog.askopenfilename(title=f"Upload {title}", filetypes=[("Images", "*.jpg *.png")])
         if file_path:
-            import os
             dest = os.path.join('templates', os.path.basename(file_path))
             os.makedirs('templates', exist_ok=True)
             cmd = f"cp '{file_path}' '{dest}'" if os.name == 'posix' else f"copy \"{file_path}\" \"{dest}\""
             os.system(cmd)
             path_list[0] = dest
             label['text'] = dest
+
     def update_brands(self, event=None):
         category = self.category_combo.get()
         if category:
@@ -220,6 +232,7 @@ class JarLabelerApp:
             self.brand_combo.set('')
             self.tier_combo.set('')
             self.tier_combo['values'] = []
+
     def update_tiers(self, event=None):
         brand_name = self.brand_combo.get()
         if brand_name:
@@ -235,6 +248,7 @@ class JarLabelerApp:
             else:
                 self.tier_combo['values'] = []
                 self.tier_combo.set('')
+
     def add_to_queue(self):
         try:
             category = self.category_combo.get()
@@ -254,7 +268,7 @@ class JarLabelerApp:
             c.execute("SELECT * FROM tiers WHERE brand_id=? AND name=?", (brand['id'], tier_name))
             tier_data = c.fetchone()
             if tier_data:
-                tier = {'id': tier_data[0], 'name': tier_data[2], 'nametag_bg_path': tier_data[3], 'pricetag_bg_path': tier_data[4]}
+                tier = {'id': tier_data[0], 'name': tier_data[2], 'prices': tier_data[3] or '{}', 'nametag_logo_path': tier_data[4]}
             else:
                 raise ValueError("Tier not found for selected brand.")
             self.gen.add_to_queue(strain, brand, tier)
@@ -267,10 +281,12 @@ class JarLabelerApp:
             self.class_combo.set('')
         except ValueError as e:
             messagebox.showerror("Error", str(e))
+
     def refresh_queue_list(self):
         self.queue_list.delete(0, tk.END)
         for summary in self.gen.get_queue_summary():
             self.queue_list.insert(tk.END, summary)
+
     def delete_from_queue(self):
         sel = self.queue_list.curselection()
         if not sel:
@@ -280,6 +296,7 @@ class JarLabelerApp:
         if messagebox.askyesno("Confirm", "Delete this queue item?"):
             self.gen.remove_from_queue(index)
             self.refresh_queue_list()
+
     def generate_pdf(self):
         try:
             pdf_path = self.gen.generate_pdf()
@@ -287,7 +304,9 @@ class JarLabelerApp:
             messagebox.showinfo("Success", f"PDF generated at {pdf_path}")
         except ValueError as e:
             messagebox.showerror("Error", str(e))
+
     def delete_brand(self):
+        # Determine which listbox has the selection
         rec_sel = self.rec_list.curselection()
         med_sel = self.med_list.curselection()
         if rec_sel:
@@ -299,39 +318,44 @@ class JarLabelerApp:
         else:
             messagebox.showerror("Error", "Select a brand to delete.")
             return
+
         brand_name = listbox.get(listbox.curselection()[0])
         if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete brand '{brand_name}' and all its tiers?"):
             return
+
         c = self.db_conn.cursor()
         c.execute("SELECT id FROM brands WHERE name=? AND category=?", (brand_name, category))
         brand_id = c.fetchone()
         if brand_id:
             brand_id = brand_id[0]
+            # Delete associated tiers first
             c.execute("DELETE FROM tiers WHERE brand_id=?", (brand_id,))
+            # Then delete the brand
             c.execute("DELETE FROM brands WHERE id=?", (brand_id,))
             self.db_conn.commit()
+
+        # Refresh everything
         self.refresh_brand_lists()
         self.update_brands()  # Refresh Generate tab combos
         self.tiers_frame.grid_remove()  # Hide tiers frame since brand is gone
         self.selected_brand_id = None
-        messagebox.showinfo("Success", f"Brand '{brand_name}' deleted.")
+        messagebox.showinfo("Success", f"Brand {brand_name} deleted.")
+
     def delete_tier(self):
         sel = self.tier_list.curselection()
         if not sel or not self.selected_brand_id:
             messagebox.showerror("Error", "Select a tier to delete.")
             return
+
         tier_name = self.tier_list.get(sel[0])
         if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete tier '{tier_name}'?"):
             return
+
         c = self.db_conn.cursor()
         c.execute("DELETE FROM tiers WHERE brand_id=? AND name=?", (self.selected_brand_id, tier_name))
         self.db_conn.commit()
+
+        # Refresh tiers list and Generate tab
         self.refresh_tier_list()
         self.update_tiers()
-        messagebox.showinfo("Success", f"Tier '{tier_name}' deleted.")
-    # Additional methods as needed for full functionality
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = JarLabelerApp(root)
-    root.mainloop()
+        messagebox.showinfo("Success", f"Tier {tier_name} deleted.")
