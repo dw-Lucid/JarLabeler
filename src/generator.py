@@ -50,8 +50,20 @@ class LabelGenerator:
             center_x = x_left + label_width / 2
             y_top = y - 0.1 * inch
             # Prepare text elements
+            # Determine tier color for medical labels
+            tier_color = black
+            if brand.get('category') == 'MED':
+                color_map = {
+                    'Green Tier': (0, 0.5, 0),
+                    'Red Tier': (1, 0, 0),
+                    'Yellow Tier': (1, 1, 0),
+                    'Orange Tier': (1, 0.65, 0),
+                    'Pink Tier': (1, 0.08, 0.58),
+                    'Purple Tier': (0.5, 0, 0.5),
+                }
+                tier_color = color_map.get(tier.get('name'), black)
             text_elements = [
-                ("Helvetica-Bold", 12, tier['name'].upper()),
+                ("Helvetica-Bold", 12, tier['name'].upper(), False, tier_color),
                 ("Helvetica-Bold", 18, strain.name.upper(), True), # underline
             ]
             if strain.lineage:
@@ -102,8 +114,12 @@ class LabelGenerator:
             for elem in text_elements:
                 font, size, text = elem[:3]
                 underline = elem[3] if len(elem) > 3 else False
+                color = elem[4] if len(elem) > 4 else black
                 pdf.setFont(font, size)
+                if color != black:
+                    pdf.setFillColorRGB(*color)
                 pdf.drawCentredString(center_x, y_current, text)
+                pdf.setFillColor(black)
                 if underline:
                     text_width = pdf.stringWidth(text)
                     underline_y = y_current - 0.05 * inch
@@ -137,7 +153,13 @@ class LabelGenerator:
                 font, size, text = elem[:3]
                 underline = elem[3] if len(elem) > 3 else False
                 pdf.setFont(font, size)
+                # Color tier name in pricetag if medical
+                if font == "Helvetica-Bold" and size == 14 and text == tier['name'].upper():
+                    pdf.setFillColor(tier_color)
+                else:
+                    pdf.setFillColor(black)
                 pdf.drawCentredString(p_center_x, p_y_current, text)
+                pdf.setFillColor(black)
                 if underline and text:
                     text_width = pdf.stringWidth(text)
                     underline_y = p_y_current - 0.05 * inch
