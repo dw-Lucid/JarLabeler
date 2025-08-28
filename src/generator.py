@@ -109,59 +109,40 @@ class LabelGenerator:
                     underline_y = y_current - 0.05 * inch
                     pdf.line(center_x - text_width / 2, underline_y, center_x + text_width / 2, underline_y)
                 y_current -= pdf._leading + 0.08 * inch
-            # Pricetag
-            p_center_x = x_left + label_width + label_width / 2
-            p_y_current = y - 0.1 * inch
-            pdf.setFont("Helvetica-Bold", 18)
-            brand_text = brand['name'].upper()
-            brand_width = pdf.stringWidth(brand_text)
-            pdf.drawCentredString(p_center_x, p_y_current, brand_text)
-            underline_y = p_y_current - 0.05 * inch
-            pdf.line(p_center_x - brand_width / 2, underline_y, p_center_x + brand_width / 2, underline_y)
-            p_y_current -= 0.3 * inch
-            pdf.setFont("Helvetica-Bold", 14)
-            tier_text = tier['name'].upper()
-            tier_width = pdf.stringWidth(tier_text)
-            pdf.drawCentredString(p_center_x, p_y_current, tier_text)
-            underline_y = p_y_current - 0.05 * inch
-            pdf.line(p_center_x - tier_width / 2, underline_y, p_center_x + tier_width / 2, underline_y)
-            p_y_current -= 0.3 * inch
-            pdf.setFont("Helvetica-Bold", 14)
             prices = tier.get('prices', {})
             def format_price(weight, price):
                 if price:
                     return f"{weight}-${price}"
-                # Pricetag: evenly distribute elements to fill right half
-                p_center_x = x_left + label_width + label_width / 2
-                p_top = y - 0.1 * inch
-                p_bottom = y - label_height + 0.1 * inch
-                # Prepare pricetag elements
-                prices = tier.get('prices', {})
-                price_lines = [
-                    ("Helvetica-Bold", 18, brand['name'].upper(), True), # underline
-                    ("Helvetica-Bold", 14, tier['name'].upper(), True), # underline
-                    ("Helvetica-Bold", 16, '   '.join(filter(None, [f"1g-${prices.get('1g','')}" if prices.get('1g') else '', f"3.5g-${prices.get('3.5g','')}" if prices.get('3.5g') else '']))),
-                    ("Helvetica-Bold", 16, '   '.join(filter(None, [f"7g-${prices.get('7g','')}" if prices.get('7g') else '', f"14g-${prices.get('14g','')}" if prices.get('14g') else '']))),
-                    ("Helvetica-Bold", 16, f"28g-${prices.get('28g','')}" if prices.get('28g') else ''),
-                ]
-                # Calculate total height for pricetag
-                total_price_height = 0
-                for font, size, *_ in price_lines:
-                    pdf.setFont(font, size)
-                    total_price_height += pdf._leading + 0.08 * inch
-                # Evenly space pricetag elements
-                price_gap = (p_top - p_bottom - total_price_height) / (len(price_lines) + 1)
-                p_y_current = p_top - price_gap
-                for elem in price_lines:
-                    font, size, text = elem[:3]
-                    underline = elem[3] if len(elem) > 3 else False
-                    pdf.setFont(font, size)
-                    pdf.drawCentredString(p_center_x, p_y_current, text)
-                    if underline and text:
-                        text_width = pdf.stringWidth(text)
-                        underline_y = p_y_current - 0.05 * inch
-                        pdf.line(p_center_x - text_width / 2, underline_y, p_center_x + text_width / 2, underline_y)
-                    p_y_current -= pdf._leading + 0.08 * inch + price_gap
+                return ''
+            # Pricetag: evenly distribute elements to fill right half
+            p_center_x = x_left + label_width + label_width / 2
+            p_top = y - 0.1 * inch
+            p_bottom = y - label_height + 0.1 * inch
+            price_lines = [
+                ("Helvetica-Bold", 18, brand['name'].upper(), True), # underline
+                ("Helvetica-Bold", 14, tier['name'].upper(), True), # underline
+                ("Helvetica-Bold", 16, '   '.join(filter(None, [format_price('1g', prices.get('1g')), format_price('3.5g', prices.get('3.5g'))]))),
+                ("Helvetica-Bold", 16, '   '.join(filter(None, [format_price('7g', prices.get('7g')), format_price('14g', prices.get('14g'))]))),
+                ("Helvetica-Bold", 16, format_price('28g', prices.get('28g'))),
+            ]
+            # Calculate total height for pricetag
+            total_price_height = 0
+            for font, size, *_ in price_lines:
+                pdf.setFont(font, size)
+                total_price_height += pdf._leading + 0.08 * inch
+            # Evenly space pricetag elements
+            price_gap = (p_top - p_bottom - total_price_height) / (len(price_lines) + 1)
+            p_y_current = p_top - price_gap
+            for elem in price_lines:
+                font, size, text = elem[:3]
+                underline = elem[3] if len(elem) > 3 else False
+                pdf.setFont(font, size)
+                pdf.drawCentredString(p_center_x, p_y_current, text)
+                if underline and text:
+                    text_width = pdf.stringWidth(text)
+                    underline_y = p_y_current - 0.05 * inch
+                    pdf.line(p_center_x - text_width / 2, underline_y, p_center_x + text_width / 2, underline_y)
+                p_y_current -= pdf._leading + 0.08 * inch + price_gap
         pdf.save()
         abs_path = os.path.abspath(pdf_path)
         try:
