@@ -109,7 +109,7 @@ class LabelGenerator:
             else:
                 logo_height_used = 0.3 * inch
             # Add extra space between logo and first text line
-            gap_after_logo = 0.18 * inch
+            gap_after_logo = 0.1 * inch
             y_current = y_top - logo_height_used - gap_after_logo
             for elem in text_elements:
                 font, size, text = elem[:3]
@@ -132,20 +132,20 @@ class LabelGenerator:
                 return ''
             # Pricetag: evenly distribute elements to fill right half
             p_center_x = x_left + label_width + label_width / 2
-            p_top = y - 0.1 * inch
+            p_top = y - 0.3 * inch
             p_bottom = y - label_height + 0.1 * inch
             price_lines = [
-                ("Helvetica-Bold", 18, brand['name'].upper(), True), # underline
-                ("Helvetica-Bold", 14, tier['name'].upper(), True), # underline
-                ("Helvetica-Bold", 16, '   '.join(filter(None, [format_price('1g', prices.get('1g')), format_price('3.5g', prices.get('3.5g'))]))),
-                ("Helvetica-Bold", 16, '   '.join(filter(None, [format_price('7g', prices.get('7g')), format_price('14g', prices.get('14g'))]))),
-                ("Helvetica-Bold", 16, format_price('28g', prices.get('28g'))),
+                ("Helvetica-Bold", 22, brand['name'].upper(), True), # underline
+                ("Helvetica-Bold", 18, tier['name'].upper(), True), # underline
+                ("Helvetica-Bold", 20, '   '.join(filter(None, [format_price('1g', prices.get('1g')), format_price('3.5g', prices.get('3.5g'))]))),
+                ("Helvetica-Bold", 20, '   '.join(filter(None, [format_price('7g', prices.get('7g')), format_price('14g', prices.get('14g'))]))),
+                ("Helvetica-Bold", 20, format_price('28g', prices.get('28g'))),
             ]
             # Calculate total height for pricetag
             total_price_height = 0
             for font, size, *_ in price_lines:
                 pdf.setFont(font, size)
-                total_price_height += pdf._leading + 0.08 * inch
+                total_price_height += pdf._leading + 0.1 * inch
             # Evenly space pricetag elements
             price_gap = (p_top - p_bottom - total_price_height) / (len(price_lines) + 1)
             p_y_current = p_top - price_gap
@@ -154,7 +154,7 @@ class LabelGenerator:
                 underline = elem[3] if len(elem) > 3 else False
                 pdf.setFont(font, size)
                 # Color tier name in pricetag if medical
-                if font == "Helvetica-Bold" and size == 14 and text == tier['name'].upper():
+                if font == "Helvetica-Bold" and size == 18 and text == tier['name'].upper():
                     pdf.setFillColor(tier_color)
                 else:
                     pdf.setFillColor(black)
