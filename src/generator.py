@@ -27,6 +27,26 @@ class LabelGenerator:
     def generate_pdf(self):
         if not self.queue:
             raise ValueError("Queue is empty. Add pairs first.")
+        
+        # Configurable variables for easy formatting/spacing adjustments
+        nametag_font_sizes = {
+            'tier': 12,      # Tier name size
+            'strain': 18,    # Strain name size (bold, underlined)
+            'lineage': 10,   # Lineage size
+            'class': 14,     # Classification size
+            'thc': 14        # THC% size
+        }
+        pricetag_font_sizes = {
+            'brand': 22,     # Brand name size (underlined)
+            'tier': 18,      # Tier name size (underlined)
+            'prices': 20     # Price lines size
+        }
+        line_spacing_extra = 0.05 * inch  # Extra vertical space between nametag lines (adjust to tighten/loosen)
+        gap_after_logo = 0.2 * inch       # Gap below logo before text starts (adjust for more/less breathing room)
+        price_line_extra = 0.08 * inch    # Extra vertical padding per pricetag line
+        no_logo_top_margin = 0.3 * inch   # Top margin if no logo (adjust to reduce empty space at top)
+        underline_offset = 0.03 * inch    # Vertical offset for underlines (adjust if lines overlap text)
+        
         os.makedirs('output', exist_ok=True)
         pdf_path = os.path.join('output', 'labels.pdf')
         pdf = canvas.Canvas(pdf_path, pagesize=letter)
@@ -63,18 +83,18 @@ class LabelGenerator:
                 }
                 tier_color = color_map.get(tier.get('name'), black)
             text_elements = [
-                ("Helvetica-Bold", 12, tier['name'].upper(), False, tier_color),
-                ("Helvetica-Bold", 18, strain.name.upper(), True), # underline
+                ("Helvetica-Bold", nametag_font_sizes['tier'], tier['name'].upper(), False, tier_color),
+                ("Helvetica-Bold", nametag_font_sizes['strain'], strain.name.upper(), True), # underline
             ]
             if strain.lineage:
-                text_elements.append(("Helvetica", 10, f"({strain.lineage})"))
-            text_elements.append(("Helvetica-Bold", 14, strain.classification))
-            text_elements.append(("Helvetica-Bold", 14, f"THC: {strain.thc_percent:.2f}%"))
+                text_elements.append(("Helvetica", nametag_font_sizes['lineage'], f"({strain.lineage})"))
+            text_elements.append(("Helvetica-Bold", nametag_font_sizes['class'], strain.classification))
+            text_elements.append(("Helvetica-Bold", nametag_font_sizes['thc'], f"THC: {strain.thc_percent:.2f}%"))
             # Estimate total text height
             total_text_height = 0
             for font, size, *_ in text_elements:
                 pdf.setFont(font, size)
-                total_text_height += pdf._leading + 0.08 * inch
+                total_text_height += pdf._leading + line_spacing_extra
             # Set max logo height so logo + text fits label
             available_height = label_height - 0.2 * inch
             max_logo_height = available_height * 0.35
@@ -101,16 +121,14 @@ class LabelGenerator:
                         logo_x = center_x - logo_width / 2
                         logo_y = y_top - logo_height
                         pdf.drawImage(logo_img, logo_x, logo_y, logo_width, logo_height, mask='auto')
-                        logo_height_used = logo_height + 0.12 * inch
+                        logo_height_used = logo_height + gap_after_logo
                     except Exception as e:
                         print(f"Tier logo error: {e}")
                 else:
                     print(f"Tier logo file not found: {abs_logo_path}")
             else:
-                logo_height_used = 0.3 * inch
-            # Add extra space between logo and first text line
-            gap_after_logo = 0.1 * inch
-            y_current = y_top - logo_height_used - gap_after_logo
+                logo_height_used = no_logo_top_margin
+            y_current = y_top - logo_height_used
             for elem in text_elements:
                 font, size, text = elem[:3]
                 underline = elem[3] if len(elem) > 3 else False
@@ -122,9 +140,9 @@ class LabelGenerator:
                 pdf.setFillColor(black)
                 if underline:
                     text_width = pdf.stringWidth(text)
-                    underline_y = y_current - 0.05 * inch
+                    underline_y = y_current - underline_offset
                     pdf.line(center_x - text_width / 2, underline_y, center_x + text_width / 2, underline_y)
-                y_current -= pdf._leading + 0.08 * inch
+                y_current -= pdf._leading + line_spacing_extra
             prices = tier.get('prices', {})
             def format_price(weight, price):
                 if price:
@@ -134,27 +152,37 @@ class LabelGenerator:
             p_center_x = x_left + label_width + label_width / 2
             p_top = y - 0.3 * inch
             p_bottom = y - label_height + 0.1 * inch
+            # Collect non-empty price lines to avoid wasting space on blanks
             price_lines = [
-                ("Helvetica-Bold", 22, brand['name'].upper(), True), # underline
-                ("Helvetica-Bold", 18, tier['name'].upper(), True), # underline
-                ("Helvetica-Bold", 20, '   '.join(filter(None, [format_price('1g', prices.get('1g')), format_price('3.5g', prices.get('3.5g'))]))),
-                ("Helvetica-Bold", 20, '   '.join(filter(None, [format_price('7g', prices.get('7g')), format_price('14g', prices.get('14g'))]))),
-                ("Helvetica-Bold", 20, format_price('28g', prices.get('28g'))),
+                ("Helvetica-Bold", pricetag_font_sizes['brand'], brand['name'].upper(), True), # underline
+                ("Helvetica-Bold", pricetag_font_sizes['tier'], tier['name'].upper(), True), # underline
             ]
+            line1 = '   '.join(filter(None, [format_price('1g', prices.get('1g')), format_price('3.5g', prices.get('3.5g'))]))
+            if line1:
+                price_lines.append(("Helvetica-Bold", pricetag_font_sizes['prices'], line1))
+            line2 = '   '.join(filter(None, [format_price('7g', prices.get('7g')), format_price('14g', prices.get('14g'))]))
+            if line2:
+                price_lines.append(("Helvetica-Bold", pricetag_font_sizes['prices'], line2))
+            line3 = format_price('28g', prices.get('28g'))
+            if line3:
+                price_lines.append(("Helvetica-Bold", pricetag_font_sizes['prices'], line3))
+            line4 = format_price('1lb', prices.get('1lb'))  # Added support for 1lb
+            if line4:
+                price_lines.append(("Helvetica-Bold", pricetag_font_sizes['prices'], line4))
             # Calculate total height for pricetag
             total_price_height = 0
             for font, size, *_ in price_lines:
                 pdf.setFont(font, size)
-                total_price_height += pdf._leading + 0.1 * inch
+                total_price_height += pdf._leading + price_line_extra
             # Evenly space pricetag elements
-            price_gap = (p_top - p_bottom - total_price_height) / (len(price_lines) + 1)
+            price_gap = (p_top - p_bottom - total_price_height) / (len(price_lines) + 1) if len(price_lines) > 0 else 0
             p_y_current = p_top - price_gap
             for elem in price_lines:
                 font, size, text = elem[:3]
                 underline = elem[3] if len(elem) > 3 else False
                 pdf.setFont(font, size)
                 # Color tier name in pricetag if medical
-                if font == "Helvetica-Bold" and size == 18 and text == tier['name'].upper():
+                if font == "Helvetica-Bold" and size == pricetag_font_sizes['tier'] and text == tier['name'].upper():
                     pdf.setFillColor(tier_color)
                 else:
                     pdf.setFillColor(black)
@@ -162,9 +190,9 @@ class LabelGenerator:
                 pdf.setFillColor(black)
                 if underline and text:
                     text_width = pdf.stringWidth(text)
-                    underline_y = p_y_current - 0.05 * inch
+                    underline_y = p_y_current - underline_offset
                     pdf.line(p_center_x - text_width / 2, underline_y, p_center_x + text_width / 2, underline_y)
-                p_y_current -= pdf._leading + 0.08 * inch + price_gap
+                p_y_current -= pdf._leading + price_line_extra + price_gap
         pdf.save()
         abs_path = os.path.abspath(pdf_path)
         try:
@@ -174,5 +202,4 @@ class LabelGenerator:
                 subprocess.call(['start', abs_path], shell=True)
         except Exception as e:
             messagebox.showerror("Open Failed", f"PDF at {abs_path}; error: {e}. Open manually.")
-        return pdf_path
         return pdf_path
