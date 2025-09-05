@@ -65,7 +65,7 @@ class JarLabelerApp:
         self.med_list.bind('<<ListboxSelect>>', lambda e: self.show_brand_details('MED'))
         # Tiers frame for selected brand
         self.tiers_frame = ttk.LabelFrame(self.config_frame, text='Brand Tiers')
-        self.tiers_frame.grid(row=0, column=2, rowspan=2, padx=10, pady=10, sticky='ns')
+        self.tiers_frame.grid(row=0, column=2, rowspan=4, padx=10, pady=10, sticky='ns')
         self.tiers_frame.grid_remove()  # Hide until brand selected
         self.tier_list = tk.Listbox(self.tiers_frame)
         self.tier_list.pack(fill='both', expand=True)
@@ -74,7 +74,8 @@ class JarLabelerApp:
         tk.Button(self.tiers_frame, text="Delete Tier", command=self.delete_tier).pack()
         # Create new brand button
         tk.Button(self.config_frame, text="Create New Brand", command=self.open_new_brand_window).grid(row=1, column=0, columnspan=2, pady=10)
-        tk.Button(self.config_frame, text="Delete Selected Brand", command=self.delete_brand).grid(row=2, column=0, columnspan=2, pady=10)
+        tk.Button(self.config_frame, text="Edit Selected Brand", command=self.open_edit_brand_window).grid(row=2, column=0, columnspan=2, pady=10)
+        tk.Button(self.config_frame, text="Delete Selected Brand", command=self.delete_brand).grid(row=3, column=0, columnspan=2, pady=10)
         self.selected_brand_id = None
         self.selected_tier_id = None
         self.refresh_brand_lists()
@@ -370,3 +371,59 @@ class JarLabelerApp:
         self.refresh_tier_list()
         self.update_tiers()
         messagebox.showinfo("Success", f"Tier {tier_name} deleted.")
+
+    def open_edit_brand_window(self):
+        # Determine selected brand
+        rec_sel = self.rec_list.curselection()
+        med_sel = self.med_list.curselection()
+        if rec_sel:
+            category = 'REC'
+            listbox = self.rec_list
+        elif med_sel:
+            category = 'MED'
+            listbox = self.med_list
+        else:
+            messagebox.showerror("Error", "Select a brand to edit.")
+            return
+
+        brand_name = listbox.get(listbox.curselection()[0])
+        c = self.db_conn.cursor()
+        c.execute("SELECT id, name, category, logo_path FROM brands WHERE name=? AND category=?", (brand_name, category))
+        data = c.fetchone()
+        if not data:
+            messagebox.showerror("Error", "Brand data not found.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Edit Brand")
+        tk.Label(win, text="Category").pack()
+        cat_combo = ttk.Combobox(win, values=["REC", "MED"])
+        cat_combo.pack()
+        cat_combo.set(data[2])
+        tk.Label(win, text="Brand Name").pack()
+        name_entry = tk.Entry(win)
+        name_entry.pack()
+        name_entry.insert(0, data[1])
+        logo_path = [data[3]]  # Mutable list for path
+        tk.Button(win, text="Upload Logo (optional)", command=lambda: self._upload_and_set(logo_path, logo_label, "Logo")).pack()
+        logo_label = tk.Label(win, text=logo_path[0] or "No logo")
+        logo_label.pack()
+
+        def save_brand():
+            new_category = cat_combo.get()
+            new_name = name_entry.get()
+            if not (new_category and new_name):
+                messagebox.showerror("Error", "Category and name required.")
+                return
+            try:
+                c.execute("UPDATE brands SET name=?, category=?, logo_path=? WHERE id=?",
+                          (new_name, new_category, logo_path[0], data[0]))
+                self.db_conn.commit()
+                self.refresh_brand_lists()
+                self.update_brands()  # Refresh main tab
+                messagebox.showinfo("Success", f"Brand {new_name} updated.")
+                win.destroy()
+            except sqlite3.IntegrityError:
+                messagebox.showerror("Error", "Brand name must be unique within category.")
+
+        tk.Button(win, text="Save Brand", command=save_brand).pack()
